@@ -58,9 +58,8 @@ class AlarmManager:
             self.alarms = []
 
     def _save(self):
-        with self.lock:
-            with open(self.path, 'w') as f:
-                json.dump(self.alarms, f, indent=2)
+        with open(self.path, 'w') as f:
+            json.dump(self.alarms, f, indent=2)
 
     def add_alarm(self, hour, minute, description):
         alarm = {
@@ -71,7 +70,7 @@ class AlarmManager:
         }
         with self.lock:
             self.alarms.append(alarm)
-        self._save()
+            self._save()
 
     def list_alarms(self):
         with self.lock:
