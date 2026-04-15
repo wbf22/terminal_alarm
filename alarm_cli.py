@@ -82,9 +82,17 @@ class AlarmManager:
                 self.alarms[idx]['triggered_date'] = date_str
                 self._save()
 
+    def delete_alarm(self, idx):
+        """Delete alarm by internal index (0-based). Returns True if deleted."""
+        with self.lock:
+            if 0 <= idx < len(self.alarms):
+                self.alarms.pop(idx)
+                self._save()
+                return True
+        return False
 
 def play_sound(path=BEEP_FILE):
-    # best-effort cross-platform playback
+    # best-effort cross-platform playback; suppress subprocess output
     if sys.platform.startswith('win'):
         try:
             import winsound
@@ -96,20 +104,19 @@ def play_sound(path=BEEP_FILE):
     if sys.platform == 'darwin':
         for cmd in (['afplay', path], ['play', path]):
             try:
-                subprocess.Popen(cmd)
+                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 return
             except Exception:
                 pass
     # Linux / others
     for cmd in (['aplay', path], ['paplay', path], ['play', path]):
         try:
-            subprocess.Popen(cmd)
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return
         except Exception:
             pass
     # fallback: ASCII bell
     print('\a')
-
 
 class AlertPopup(threading.Thread):
     """
@@ -245,16 +252,17 @@ def clear_screen():
         sys.stdout.write('\x1b[2J\x1b[H')
         sys.stdout.flush()
 
-
 def print_pending_alarms(manager):
-    alarms = [a for a in manager.list_alarms() if not a.get('triggered_date')]
-    if not alarms:
+    """Print pending alarms and return a list of their internal indices."""
+    alarms_full = manager.list_alarms()
+    pending = [(idx, a) for idx, a in enumerate(alarms_full) if not a.get('triggered_date')]
+    if not pending:
         print(f"{YELLOW}No pending alarms.{RESET}")
-        return
+        return []
     print(f"{BOLD}{GREEN}Pending Alarms:{RESET}")
-    for idx, a in enumerate(alarms):
-        print(f" {CYAN}{idx+1}.{RESET} {format_alarm(a)}")
-
+    for disp_idx, (internal_idx, a) in enumerate(pending, start=1):
+        print(f" {CYAN}{disp_idx}.{RESET} {format_alarm(a)}")
+    return [internal_idx for internal_idx, _ in pending]
 
 def ack_all_popups():
     """Acknowledge all active popups."""
@@ -269,8 +277,6 @@ def ack_all_popups():
         except Exception:
             pass
     print("Acknowledged active alarms.")
-
-
 def run_simple_cli(manager):
     watcher = AlarmWatcher(manager)
     watcher.start()
@@ -279,8 +285,8 @@ def run_simple_cli(manager):
         while True:
             clear_screen()
             print(f"{BOLD}{CYAN}Simple Alarm CLI{RESET}")
-            print("Type 'new' to add an alarm, 'ack' to stop active alerts, 'q' to quit.\n")
-            print_pending_alarms(manager)
+            print("Type 'new' to add an alarm, 'ack' to stop active alerts, 'del' to delete an alarm, 'q' to quit.\n")
+            pending_indices = print_pending_alarms(manager)
 
             cmd = input(f"\n{GREEN}> {RESET}").strip()
             if not cmd:
@@ -344,14 +350,42 @@ def run_simple_cli(manager):
                 manager.add_alarm(hour24, m, desc)
                 print(f"{GREEN}Saved alarm: { _format_12h(hour24, m) } - {desc}{RESET}")
                 time.sleep(1.0)
+            elif c in ('del', 'delete'):
+                if not pending_indices:
+                    print('No pending alarms to delete.')
+                    time.sleep(1.0)
+                    continue
+                # ask which displayed number to delete
+                while True:
+                    sel = input('Enter the number of the alarm to delete (or c to cancel): ').strip().lower()
+                    if sel in ('c', 'cancel'):
+                        break
+                    try:
+                        s = int(sel)
+                        if 1 <= s <= len(pending_indices):
+                            internal_idx = pending_indices[s-1]
+                            confirmed = input(f"Are you sure you want to delete alarm {s}? (y/N): ").strip().lower()
+                            if confirmed == 'y':
+                                if manager.delete_alarm(internal_idx):
+                                    print('Deleted.')
+                                else:
+                                    print('Failed to delete (index may have changed).')
+                            else:
+                                print('Cancelled.')
+                            time.sleep(1.0)
+                            break
+                        else:
+                            print(f'Please enter a number between 1 and {len(pending_indices)}')
+                    except ValueError:
+                        print('Please enter a number')
+                continue
             else:
-                print("Unknown command. Use 'new' to add, 'ack' to acknowledge, or 'q' to quit.")
+                print("Unknown command. Use 'new' to add, 'ack' to acknowledge, 'del' to delete, or 'q' to quit.")
                 time.sleep(1.0)
     except KeyboardInterrupt:
         print('\nInterrupted, exiting.')
     finally:
         watcher.stop()
-
 
 def main():
     ensure_beep_file()
