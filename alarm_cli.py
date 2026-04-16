@@ -2,6 +2,7 @@
 import datetime
 import json
 import os
+from pathlib import Path
 import sys
 import threading
 import time
@@ -277,6 +278,7 @@ def ack_all_popups():
         except Exception:
             pass
     print("Acknowledged active alarms.")
+
 def run_simple_cli(manager):
     watcher = AlarmWatcher(manager)
     watcher.start()
@@ -394,4 +396,11 @@ def main():
 
 
 if __name__ == '__main__':
+    if sys.platform == 'darwin':
+        p = Path(ALARMS_FILE)
+        if not p.exists():
+            print(f"{YELLOW}To show alerts make sure Script Editor has notification permissions. If you can't find it open it and run 'display notification \"bob\" with title \"Alarm\" subtitle \"12:12pm\"'. Then look back in notifications in settings. It might take some time to appear{RESET}")
+            input('hit enter to continue and test a notification')
+            subprocess.Popen(['osascript', '-e', f'display notification "You can see notifications!" with title "Alarm"'])
+
     main()
